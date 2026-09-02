@@ -1,0 +1,78 @@
+name: Daily A-share Sector Thermometer
+
+on:
+  schedule:
+    # 北京时间 = UTC + 8h。GitHub 定时任务存在排队延迟（实测可达 3~5 小时），
+    # 因此一天排 5 个点且全部错开整点，保证当天一定能刷到最新收盘数据。
+    # 北京 08:41 / 12:21 / 15:51 / 18:41 / 21:21，周一至周五
+    - cron: "41 0 * * 1-5"
+    - cron: "21 4 * * 1-5"
+    - cron: "51 7 * * 1-5"
+    - cron: "41 10 * * 1-5"
+    - cron: "21 13 * * 1-5"
+  push:
+    # 手动改脚本/标的池后立即重跑；报表自身的自动提交不触发（防自激循环）
+    branches: [main]
+    paths-ignore:
+      - '**.html'
+      - 'sector_data.json'
+      - '.github/workflows/**'
+  workflow_dispatch: {}   # 允许在 Actions 页面点「Run workflow」立即刷新
+
+permissions:
+  contents: write
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 纯标准库（json/subprocess/datetime），无需安装任何依赖
+      - name: Fetch sector K-line & compute
+        run: |
+          for i in $(seq 1 5); do
+            if python fetch_sector.py; then
+              echo "fetch sector ok"; exit 0
+            fi
+            echo "fetch_sector 第 $i 次失败，25s 后重试"; sleep 25
+          done
+          echo "fetch_sector 最终失败"; exit 1
+
+      - name: Build HTML
+        run: python build_sector.py
+
+      - name: Sanity check output
+        run: |
+          python - <<'PY'
+          import re, json, sys
+          s = open('index.html', encoding='utf-8').read()
+          if not s.strip().endswith('</html>'):
+              sys.exit('index.html 结构不完整')
+          if re.findall(r'__[A-Z]+__', s):
+              sys.exit('存在未替换占位符: %s' % re.findall(r'__[A-Z]+__', s))
+          m = re.search(r'const DATA=(\{.*?\});\nconst BENCH', s, re.S)
+          if not m:
+              sys.exit('找不到内嵌数据 DATA')
+          n = len(json.loads(m.group(1)))
+          if n < 40:
+              sys.exit('标的数异常: %d' % n)
+          print('校验通过：%d 个标的，%d 字节' % (n, len(s)))
+          PY
+
+      - name: Commit & push updated report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html sector_report.html sector_data.json
+          git diff --cached --quiet || git commit -m "chore: daily update $(date +%F' '%H:%M)"
+          git push
