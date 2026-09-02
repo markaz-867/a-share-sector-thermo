@@ -199,6 +199,45 @@ def window_stats(dates, closes, w):
     }
 
 
+def pos_at(dates, closes, w, days_ago):
+    """days_ago 个交易日之前的位置百分位（用当时可见的滚动窗口重算，非当前窗口）"""
+    if days_ago and len(closes) <= days_ago + 30:
+        return None
+    sub = closes[:len(closes) - days_ago] if days_ago else closes
+    if len(sub) < 30:
+        return None
+    seg = sub[-w:] if len(sub) > w else sub
+    lo, hi = min(seg), max(seg)
+    return round(pct_pos(sub[-1], lo, hi), 1)
+
+
+def momentum(dates, closes, w5=W5):
+    """轮动速度：位置百分位在 20 / 60 个交易日内的变化
+    正=在往上爬（从深坑出来或加速上涨）；负=在往下掉"""
+    now = pos_at(dates, closes, w5, 0)
+    p20 = pos_at(dates, closes, w5, 20)
+    p60 = pos_at(dates, closes, w5, 60)
+    return {
+        "now": now,
+        "d20": None if (now is None or p20 is None) else round(now - p20, 1),
+        "d60": None if (now is None or p60 is None) else round(now - p60, 1),
+        "p20": p20, "p60": p60,
+    }
+
+
+def sample_monthly(dates, closes, step=21, maxn=70):
+    """月度采样走势（约每 21 个交易日一点），价格 ×100 取整压缩
+    从最新往回取，保证最后一点=最新收盘"""
+    n = len(closes)
+    idxs = list(range(n - 1, -1, -step))[::-1]
+    if len(idxs) > maxn:
+        idxs = idxs[-maxn:]
+    return {
+        "d": [dates[i] for i in idxs],
+        "c": [int(round(closes[i] * 100)) for i in idxs],
+    }
+
+
 def yearly_extremes(dates, closes):
     """逐年低点/高点（收盘口径）"""
     y = {}
@@ -293,10 +332,22 @@ def main():
             "w3": w3, "w5": w5,
             "ret1y": ret1y, "excess1y": excess, "ytd": ytd,
             "bottom": bottom_trend(dates, closes),
+            "mom": momentum(dates, closes),
+            "series": sample_monthly(dates, closes),
             "yearly": yearly_extremes(dates, closes),
         })
         print(f"  ✓ {name:<14}({code}) {len(closes):>5}根 {dates[0]}→{dates[-1]} "
               f"3年{w3['pos']:>5.1f}% 5年{w5['pos']:>5.1f}% [{src}]")
+
+    # 组内排名（5 年位置口径）：位置越高排越前
+    from collections import defaultdict
+    gmap = defaultdict(list)
+    for it in items:
+        gmap[it["group"]].append(it)
+    for grp, lst in gmap.items():
+        lst.sort(key=lambda x: -x["w5"]["pos"])
+        for i, it in enumerate(lst, 1):
+            it["rank"], it["g_size"] = i, len(lst)
 
     out = {
         "meta": {
