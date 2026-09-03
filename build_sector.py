@@ -358,6 +358,25 @@ tr:hover td{background:#14304d}
 .tn{font-size:11px;color:#cfe0f2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tv{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25}
 .tz{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.opHead{font-size:12px;color:#9ab3cc;margin-bottom:12px;padding:10px 12px;background:#0c2238;border:1px solid #1c3a5e;border-radius:8px}
+.opHead b{font-variant-numeric:tabular-nums}
+.opList{display:flex;flex-direction:column;gap:6px;overflow-x:auto}
+.opRow{display:grid;grid-template-columns:34px 1.6fr 1.1fr .8fr .7fr 1fr 1fr;align-items:center;gap:10px;min-width:640px;background:#0c2238;border:1px solid #1c3a5e;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:13px}
+.opRow:hover{border-color:#2a5a8a;background:#102a43}
+.opNo{color:#5d7a99;font-weight:600;text-align:center;font-variant-numeric:tabular-nums}
+.opName{font-weight:500;color:#e6f0fa}
+.opGrp{display:block;font-size:10px;color:#5d7a99;font-weight:400;margin-top:1px}
+.opPos{display:flex;align-items:center;gap:7px}
+.opPos i{height:6px;border-radius:3px;display:block;min-width:3px}
+.opPos b{font-variant-numeric:tabular-nums;color:#cfe0f2}
+.opMom{font-variant-numeric:tabular-nums;font-weight:600}
+.opMom.up{color:#FF5B5B}
+.opMom.dn{color:#1EC98B}
+.opRank{color:#9ab3cc;font-variant-numeric:tabular-nums}
+.opZone{font-weight:600;font-size:12px;white-space:nowrap}
+.opScore{display:flex;align-items:center;gap:7px}
+.opScore i{height:6px;border-radius:3px;display:block;min-width:3px;background:#6f8bab}
+.opScore b{font-variant-numeric:tabular-nums;color:#e6f0fa;min-width:22px;text-align:right}
 </style></head><body>
 <div class="wrap">
 <h1>A股板块位置温度计</h1>
@@ -369,6 +388,7 @@ __HEADLINE__
 <div class="ctl">
   <div class="cg"><span class="clab">视图</span>
     <span class="tab on" data-v="tp">瓦片</span>
+    <span class="tab" data-v="op">机会</span>
     <span class="tab" data-v="mx">矩阵</span>
     <span class="tab" data-v="rk">排行</span>
     <span class="tab" data-v="tb">表格</span>
@@ -392,6 +412,11 @@ __HEADLINE__
 <div class="view on" id="v-tp">
   <div id="tileBox"></div>
   <div class="sub" style="margin-top:10px">每个方块是一个标的，数字 = 位置百分位（0 = 窗口最低，100 = 窗口最高），底色按冷热分档。点击方块查看详情。</div>
+</div>
+
+<div class="view" id="v-op">
+  <div id="opBox"></div>
+  <div class="sub" style="margin-top:10px">信号分 = 位置低 55% + 轮动转强 20% + 组内靠前 15% + 状态质量 10%，窗口切换时实时重算。分数仅作筛选排序参考，仍需结合详情三重确认再动手。</div>
 </div>
 
 <div class="view" id="v-mx">
@@ -451,6 +476,22 @@ const cp=v=>v<=20?'#1E88C9':v<=40?'#4FA3D1':v<=60?'#6f8bab':v<=80?'#FFA726':'#FF
 const zc=t=>{const m={'阴跌寻底':'#8fa8c4','低位磨底':'#4FA3D1','低位企稳':'#5DCAA5','底部反转':'#1EC98B',
   '回暖中':'#5DCAA5','偏低':'#4FA3D1','中性':'#6f8bab','偏高':'#FFA726','高位走弱':'#FF5B5B','高位强势':'#FF5B5B','高位':'#FF5B5B'};
   return m[t]||'#6f8bab';};
+// 状态质量：底部反转/企稳质量高，高位/阴跌质量低，用于信号分合成
+const ZONEQ={'阴跌寻底':0.30,'低位磨底':0.60,'低位企稳':0.85,'底部反转':1.0,'回暖中':0.80,
+  '偏低':0.55,'中性':0.50,'偏高':0.15,'高位走弱':0.10,'高位强势':0.05,'高位':0.05};
+const clamp01=x=>Math.max(0,Math.min(1,x));
+// 机会信号分：便宜(位置低)+在转强(轮动20日上行)+组内相对强+状态质量好 —— 窗口 W 切换时实时重算
+function signalOf(d){
+  const p=d[W].pos;
+  const cold=(100-p)/100;
+  const m=(d.mom?d.mom.d20:0)||0;
+  const mom=clamp01((m+10)/20);
+  const rankN=d.g_size>1?(1-(d.rank-1)/d.g_size):0.5;
+  const zq=ZONEQ[d.zone]!=null?ZONEQ[d.zone]:0.5;
+  // 位置低是机会的主导项；高位标的即使动量强也只是趋势跟随，不应混入便宜转强榜
+  const s=0.55*cold+0.20*mom+0.15*rankN+0.10*zq;
+  return Math.round(s*100);
+}
 
 function drawLegend(){
   const q=YDEF[YAX].q;
@@ -558,6 +599,31 @@ function drawTiles(){
   document.getElementById('tileBox').innerHTML=h||'<div class="empty">当前筛选无数据</div>';
 }
 
+function drawOpportunity(){
+  const arr=rowsFor().map(d=>({d,s:signalOf(d)})).sort((x,y)=>y.s-x.s);
+  // 强信号 = 分够高 且 20日真在转强（仍在下移的便宜标的只列为候选，不进强信号区）
+  const strong=arr.filter(x=>x.s>=60 && ((x.d.mom?x.d.mom.d20:0)||0)>0).length;
+  const cand=arr.filter(x=>x.s>=45).length;
+  let h='<div class="opHead">强信号（≥60 且 20日转强）：<b style="color:#1EC98B">'+strong+'</b> 个　·　候选（≥45）：<b style="color:#5DCAA5">'+cand+'</b> 个　·　信号分 = 位置低55% + 轮动转强20% + 组内靠前15% + 状态质量10%</div>';
+  h+='<div class="opList">';
+  arr.forEach((x,i)=>{
+    const d=x.d, sc=x.s, p=d[W].pos, m=(d.mom?d.mom.d20:0)||0, up=m>=0;
+    const mtxt=(up?'↑ ':'↓ ')+(m>0?'+':'')+m.toFixed(1);
+    const sc2=sc>=60?'#1EC98B':sc>=45?'#5DCAA5':'#6f8bab';
+    h+=`<div class="opRow" onclick="showDetail('${d.code}')">`
+      +`<span class="opNo">${i+1}</span>`
+      +`<div class="opName">${d.name}<span class="opGrp">${d.group}</span></div>`
+      +`<div class="opPos"><i style="width:${p}%;background:${cp(p)}"></i><b>${p.toFixed(0)}%</b></div>`
+      +`<div class="opMom ${up?'up':'dn'}">${mtxt}</div>`
+      +`<div class="opRank">组 ${d.rank}/${d.g_size}</div>`
+      +`<div class="opZone" style="color:${zc(d.zone)}">${d.zone}</div>`
+      +`<div class="opScore"><i style="width:${sc}%;background:${sc2}"></i><b>${sc}</b></div>`
+      +`</div>`;
+  });
+  h+='</div>';
+  document.getElementById('opBox').innerHTML=h||'<div class="empty">当前筛选无数据</div>';
+}
+
 function render(){
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+VIEW));
   document.getElementById('ycg').style.display=VIEW==='mx'?'':'none';
@@ -566,6 +632,7 @@ function render(){
     +(ZONE?'（状态：'+ZONE+'）':'')+' · 基准沪深300 位置 '+BENCH[W].pos+'%';
   drawLegend();
   if(VIEW==='tp') drawTiles();
+  if(VIEW==='op') setTimeout(()=>drawOpportunity(),20);
   // 容器刚由 display:none 转为可见时，Chart.js 量得到尺寸却不自动重绘，
   // 故延迟一帧绘制后再显式 resize 一次，否则图上只有坐标轴没有内容
   if(VIEW==='mx') setTimeout(()=>{drawMX(); setTimeout(()=>{if(MX)MX.resize();},120);},40);
