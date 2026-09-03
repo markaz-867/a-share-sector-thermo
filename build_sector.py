@@ -14,7 +14,7 @@ END_DATE = ITEMS[0]["last_date"] if ITEMS else "—"
 HIST_FILE = "history.json"
 
 ORDER = ["中证一级行业", "细分行业指数", "AI·半导体·算力", "新能源", "医药",
-         "消费", "金融地产", "资源周期", "军工·宽基"]
+         "消费", "金融地产", "资源周期", "军工", "宽基"]
 GROUPS = [g for g in ORDER if any(i["group"] == g for i in ITEMS)]
 for i in ITEMS:
     if i["group"] not in GROUPS:
@@ -27,40 +27,27 @@ def lift_of(it):
 
 
 def zone_of(it):
-    """状态标签：位置(便不便宜) × 趋势(在涨在跌) × 底部(低点抬不抬)"""
+    """状态标签（合并为 5 档）：位置(便宜与否) × 轮动方向(在涨在跌)"""
     p5 = it["w5"]["pos"]
     ex = it.get("excess1y")
     r1 = it.get("ret1y")
-    lift = lift_of(it)
+    m20 = (it.get("mom") or {}).get("d20")
     bt = it.get("bottom") or {}
     rising = bt.get("rising")
     up = (ex is not None and ex > 0) or (r1 is not None and r1 > 0)
 
-    if p5 <= 20:
-        if up and rising:
-            return "底部反转", "#1EC98B", "rgba(30,201,139,.20)"
-        if up:
-            return "低位企稳", "#5DCAA5", "rgba(93,202,165,.16)"
-        if rising or lift > 15:
-            return "低位磨底", "#4FA3D1", "rgba(79,163,209,.16)"
-        return "阴跌寻底", "#8fa8c4", "rgba(143,168,196,.14)"
-    if p5 <= 40:
-        if up and lift > 10:
-            return "回暖中", "#5DCAA5", "rgba(93,202,165,.14)"
-        return "偏低", "#4FA3D1", "rgba(79,163,209,.13)"
+    if p5 < 40:
+        turning = (m20 is not None and m20 > 0) or (rising and up)
+        if turning:
+            return "低位·转强", "#1EC98B", "rgba(30,201,139,.20)"
+        return "低位·弱势", "#8fa8c4", "rgba(143,168,196,.14)"
     if p5 <= 60:
         return "中性", "#6f8bab", "rgba(111,139,171,.12)"
-    if p5 <= 80:
-        if ex is not None and ex > 20:
-            return "高位强势", "#FF5B5B", "rgba(255,91,91,.20)"
-        if ex is not None and ex < -10:
-            return "高位走弱", "#FFA726", "rgba(255,167,38,.18)"
-        return "偏高", "#FFA726", "rgba(255,167,38,.13)"
-    if ex is not None and ex > 20:
-        return "高位强势", "#FF5B5B", "rgba(255,91,91,.20)"
-    if ex is not None and ex < -10:
-        return "高位走弱", "#FF5B5B", "rgba(255,91,91,.18)"
-    return "高位", "#FF5B5B", "rgba(255,91,91,.16)"
+    # 高位区 (p5 >= 60)
+    weakening = (m20 is not None and m20 < 0) or (ex is not None and ex < -10)
+    if weakening:
+        return "高位·走弱", "#FFA726", "rgba(255,167,38,.18)"
+    return "高位·强势", "#FF5B5B", "rgba(255,91,91,.20)"
 
 
 # 预计算状态，供前端筛选
@@ -72,9 +59,8 @@ for it in ITEMS:
     it["zb"] = tb
     ZONE_CNT[tag] = ZONE_CNT.get(tag, 0) + 1
 
-# 筛选器顺序：按「冷 → 热」排列，未出现的状态不显示
-ZONE_ORDER = ["阴跌寻底", "低位磨底", "低位企稳", "底部反转", "回暖中",
-              "偏低", "中性", "偏高", "高位走弱", "高位强势", "高位"]
+# 筛选器顺序：按「冷 → 热」排列，未出现的状态不显示（合并为 5 档）
+ZONE_ORDER = ["低位·转强", "低位·弱势", "中性", "高位·强势", "高位·走弱"]
 
 
 # ---------------- 历史快照与今日变化 ----------------
@@ -143,6 +129,7 @@ def headline_html():
     """今日看头条：先回答「今天变了吗」"""
     if not PREV:
         return ('<div class="hd"><div class="hdt">今日定调</div>'
+                '<div class="hdr" style="margin-top:0"><span class="hdl">策略</span><span class="strat">'+STRATEGY+'</span></div>'
                 '<div class="hdg">'
                 + dchip(SUM_NOW["cold"], None, "冰点区", "#1E88C9", "5年位置 <20%")
                 + dchip(SUM_NOW["hot"], None, "偏高 + 高位", "#FF5B5B", "5年位置 ≥60%")
@@ -150,11 +137,11 @@ def headline_html():
                 + '</div><div class="hdr"><span class="hdl">基准已建立</span>'
                 '<span class="dim">首次运行，已写入快照。明天起这里会显示相对上一交易日的变化。</span>'
                 '</div>'
-                + '<div class="hdr"><span class="hdl">策略</span><span class="strat">'+STRATEGY+'</span></div>'
                 + '</div>')
 
     ps = PREV.get("sum") or {}
     h = '<div class="hd"><div class="hdt">今日定调<span class="hdd">对比上一交易日 ' + PREV_KEY + '</span></div>'
+    h += '<div class="hdr" style="margin-top:0"><span class="hdl">策略</span><span class="strat">'+STRATEGY+'</span></div>'
     h += ('<div class="hdg">'
           + dchip(SUM_NOW["cold"], ps.get("cold"), "冰点区", "#1E88C9", "5年位置 <20%")
           + dchip(SUM_NOW["hot"], ps.get("hot"), "偏高 + 高位", "#FF5B5B", "5年位置 ≥60%")
@@ -180,7 +167,7 @@ def headline_html():
         h += f'<div class="hdr"><span class="hdl">状态跨档</span>{s}</div>'
     else:
         h += '<div class="hdr"><span class="hdl">状态跨档</span><span class="dim">今日无标的切换状态</span></div>'
-    return h + '<div class="hdr"><span class="hdl">策略</span><span class="strat">'+STRATEGY+'</span></div>' + '</div>'
+    return h + '</div>'
 
 
 def strategy_text():
@@ -241,19 +228,19 @@ def table_rows(grp):
         mom = it.get("mom") or {}
         rk = f'{it.get("rank","—")}<span class="dim">/{it.get("g_size","—")}</span>'
         out.append(f"""<tr onclick="showDetail('{it['code']}')">
-<td class="nm">{it['name']}{warn}<div class="sub">{it['code']} · {bars}根 · 起{it['start']}</div></td>
-<td class="num">{it['last_close']:g}</td>
-<td class="num"><b style="color:{col_pos(it['w3']['pos'])}">{it['w3']['pos']:.0f}</b><div class="bar"><i style="width:{it['w3']['pos']}%;background:{col_pos(it['w3']['pos'])}"></i></div></td>
-<td class="num"><b style="color:{col_pos(it['w5']['pos'])}">{it['w5']['pos']:.0f}</b><div class="bar"><i style="width:{it['w5']['pos']}%;background:{col_pos(it['w5']['pos'])}"></i></div></td>
-<td class="num" style="font-size:12px">{rk}</td>
-<td class="num" style="font-size:12px">{sgn_raw(mom.get('d20'))}</td>
-<td class="num" style="font-size:12px">{sgn_raw(mom.get('d60'))}</td>
-<td class="num">{sgn(it['w5']['dd_hi'])}</td>
-<td class="num">{sgn(it['ret1y'])}</td>
-<td class="num">{sgn(it['excess1y'])}</td>
-<td class="num">{sgn(it['ytd'])}</td>
-<td class="num" style="font-size:12px"><b style="color:{lc}">{lift:+.0f}</b></td>
-<td><span class="tag" style="color:{tc};background:{tb}">{tag}</span></td>
+<td class="nm" data-label="标的">{it['name']}{warn}<div class="sub">{it['code']} · {bars}根 · 起{it['start']}</div></td>
+<td class="num" data-label="现价">{it['last_close']:g}</td>
+<td class="num hide-sm" data-label="3年位置"><b style="color:{col_pos(it['w3']['pos'])}">{it['w3']['pos']:.0f}</b><div class="bar"><i style="width:{it['w3']['pos']}%;background:{col_pos(it['w3']['pos'])}"></i></div></td>
+<td class="num" data-label="5年位置"><b style="color:{col_pos(it['w5']['pos'])}">{it['w5']['pos']:.0f}</b><div class="bar"><i style="width:{it['w5']['pos']}%;background:{col_pos(it['w5']['pos'])}"></i></div></td>
+<td class="num" data-label="组内" style="font-size:12px">{rk}</td>
+<td class="num" data-label="轮动20日" style="font-size:12px">{sgn_raw(mom.get('d20'))}</td>
+<td class="num hide-sm" data-label="轮动60日" style="font-size:12px">{sgn_raw(mom.get('d60'))}</td>
+<td class="num hide-sm" data-label="距5年高">{sgn(it['w5']['dd_hi'])}</td>
+<td class="num" data-label="近1年">{sgn(it['ret1y'])}</td>
+<td class="num" data-label="超额1年">{sgn(it['excess1y'])}</td>
+<td class="num hide-sm" data-label="年初至今">{sgn(it['ytd'])}</td>
+<td class="num hide-sm" data-label="抬升度" style="font-size:12px"><b style="color:{lc}">{lift:+.0f}</b></td>
+<td data-label="状态"><span class="tag" style="color:{tc};background:{tb}">{tag}</span></td>
 </tr>""")
     return "\n".join(out)
 
@@ -431,6 +418,28 @@ tr:hover td{background:#14304d}
 .relConcl{font-size:12.5px;color:#cfe0f2;line-height:1.6;background:#0c2238;border:1px solid #1c3a5e;border-radius:8px;padding:9px 11px}
 .relConcl b{color:#1EC98B}
 .strat{color:#ffd54f;font-size:12px;line-height:1.5}
+.srch{background:#0c2238;border:1px solid #1c3a5e;color:#e6f0fa;border-radius:8px;padding:6px 10px;font-size:13px;width:170px;outline:none}
+.srch:focus{border-color:#2a5a8a}
+.srch::placeholder{color:#5d7a99}
+/* 移动端：表格行转卡片（瘦身）+ 弹窗改右侧抽屉式 */
+@media(max-width:780px){
+  .ctl{gap:10px}
+  .tw{overflow:visible}
+  table{min-width:0;width:100%}
+  thead{display:none}
+  tr{display:block;background:#0c2238;border:1px solid #1c3a5e;border-radius:8px;margin-bottom:8px;padding:4px 8px}
+  tr:hover td{background:transparent}
+  td{display:flex;justify-content:space-between;align-items:center;text-align:right;padding:5px 4px;border-bottom:1px solid #17324e;white-space:normal}
+  td:last-child{border-bottom:none}
+  td::before{content:attr(data-label);color:#6f8bab;font-size:11px;font-weight:400;text-align:left;margin-right:12px;flex-shrink:0}
+  td.nm{font-size:15px;font-weight:600}
+  td.nm .sub{font-weight:400}
+  .bar{width:48px}
+  .hide-sm{display:none}
+  .ov{align-items:stretch;justify-content:flex-end;padding:0}
+  .modal{width:100vw;max-height:100vh;height:100vh;border-radius:0;animation:slideIn .18s ease}
+  @keyframes slideIn{from{transform:translateX(36px);opacity:.55}to{transform:none;opacity:1}}
+}
 </style></head><body>
 <div class="wrap">
 <h1>A股板块位置温度计</h1>
@@ -456,6 +465,7 @@ __HEADLINE__
   <div class="cg" id="ycg"><span class="clab">纵轴</span>
     <span class="tab on" data-y="ex">近1年超额</span><span class="tab" data-y="m60">轮动60日</span><span class="tab" data-y="m20">轮动20日</span>
   </div>
+  <div class="cg"><span class="clab">搜索</span><input id="q" class="srch" placeholder="名称/代码/分组…" oninput="onSearch(this.value)"></div>
 </div>
 <div class="ctl"><div class="cg"><span class="clab">状态筛选</span>
   <span class="chip on" data-z="">全部<b>__N__</b></span>__CHIPS__
@@ -498,7 +508,7 @@ __HEADLINE__
 · <b>组内排名</b> = 该标的在自己所属分组内按 5 年位置的排名（1 = 组内位置最高）。操作层面常比绝对位置更直接。<br>
 · <b>抬升度</b> = 3年位置 − 5年位置。正值 = 近 3 年低点高于 5 年内极端低点（未破前低）；负值 = 近 3 年仍在创新低。<b>注意</b>：正值也可能只是"5年前那个坑太深"造成的统计现象（如医药 2022 年低点），必须结合「近 1 年超额」一起看才有效。<br>
 · <b>超额1年</b> = 近 1 年自身涨跌幅 − 沪深300 同期涨跌幅。<br>
-· <b>矩阵四象限</b>（纵轴=超额）：左上 <b style="color:#1EC98B">底部反转</b>（位置低且已跑赢，最稀缺）｜右上 <b style="color:#FF5B5B">高位强势</b>（位置高且仍在跑赢）｜左下 <b style="color:#8fa8c4">阴跌寻底</b>（位置低且继续跑输，慎抄底）｜右下 <b style="color:#FFA726">高位走弱</b>（位置高但已跑输，警惕回落）。<br>
+· <b>矩阵四象限</b>（纵轴=超额）：左上 <b style="color:#1EC98B">低位·转强</b>（位置低且已跑赢，最稀缺）｜右上 <b style="color:#FF5B5B">高位·强势</b>（位置高且仍在跑赢）｜左下 <b style="color:#8fa8c4">低位·弱势</b>（位置低且继续跑输，慎抄底）｜右下 <b style="color:#FFA726">高位·走弱</b>（位置高但已跑输，警惕回落）。<br>
 · <b>关键提醒</b>：位置低 ≠ 该买。宽基指数有长期向上托底，板块没有——行业可能结构性衰退（如地产、白酒）。请结合「底部是否抬升 + 超额收益是否转正 + 轮动速度是否转正」三重确认，位置低但仍在下移的属下降趋势，不宜机械抄底。<br>
 · ETF 采用不复权价格并对份额折算/分红跳空做了后向修正；行业指数为前复权。样本不足 1100 根（约 4.5 年）的标的已标注「样本短」，其 5 年位置参考价值有限。走势曲线为月度采样（每 21 个交易日取一点）。<br>
 · 本表仅为公开行情数据的量化整理，不构成任何投资建议。市场有风险，决策需谨慎。
@@ -514,8 +524,8 @@ __HEADLINE__
 const DATA=__DATAJS__;
 const BENCH=__BENCHJS__;
 const GROUPS=__GROUPSJS__;
-let W='w5', POOL='all', VIEW='op', ZONE='', YAX='ex', CH=null, MX=null;
-const YDEF={ex:{k:'excess1y',t:'近1年超额',u:'%',q:['底部反转','高位强势','阴跌寻底','高位走弱']},
+let W='w5', POOL='all', VIEW='op', ZONE='', YAX='ex', KEY='', CH=null, MX=null;
+const YDEF={ex:{k:'excess1y',t:'近1年超额',u:'%',q:['低位·转强','高位·强势','低位·弱势','高位·走弱']},
             m60:{k:'d60',t:'轮动60日',u:'',q:['低位爬升','高位加速','低位下坠','高位回落']},
             m20:{k:'d20',t:'轮动20日',u:'',q:['低位反弹','高位冲高','低位探底','高位跳水']}};
 
@@ -525,15 +535,14 @@ function rowsFor(){
   if(POOL==='idx') a=a.filter(x=>x.kind==='idx');
   if(POOL==='etf') a=a.filter(x=>x.kind==='etf');
   if(ZONE) a=a.filter(x=>x.zone===ZONE);
+  if(KEY){const k=KEY; a=a.filter(x=>x.name.toLowerCase().includes(k)||x.code.toLowerCase().includes(k)||x.group.toLowerCase().includes(k));}
   return a;
 }
 const cp=v=>v<=20?'#1E88C9':v<=40?'#4FA3D1':v<=60?'#6f8bab':v<=80?'#FFA726':'#FF5B5B';
-const zc=t=>{const m={'阴跌寻底':'#8fa8c4','低位磨底':'#4FA3D1','低位企稳':'#5DCAA5','底部反转':'#1EC98B',
-  '回暖中':'#5DCAA5','偏低':'#4FA3D1','中性':'#6f8bab','偏高':'#FFA726','高位走弱':'#FF5B5B','高位强势':'#FF5B5B','高位':'#FF5B5B'};
+const zc=t=>{const m={'低位·转强':'#1EC98B','低位·弱势':'#8fa8c4','中性':'#6f8bab','高位·强势':'#FF5B5B','高位·走弱':'#FFA726'};
   return m[t]||'#6f8bab';};
-// 状态质量：底部反转/企稳质量高，高位/阴跌质量低，用于信号分合成
-const ZONEQ={'阴跌寻底':0.30,'低位磨底':0.60,'低位企稳':0.85,'底部反转':1.0,'回暖中':0.80,
-  '偏低':0.55,'中性':0.50,'偏高':0.15,'高位走弱':0.10,'高位强势':0.05,'高位':0.05};
+// 状态质量：低位转强质量最高，高位质量最低，用于信号分合成
+const ZONEQ={'低位·转强':1.0,'低位·弱势':0.45,'中性':0.50,'高位·强势':0.05,'高位·走弱':0.10};
 const clamp01=x=>Math.max(0,Math.min(1,x));
 // 机会信号分：便宜(位置低)+在转强(轮动20日上行)+组内相对强+状态质量好 —— 窗口 W 切换时实时重算
 function signalOf(d){
@@ -655,14 +664,12 @@ function drawTiles(){
 }
 
 function verdictOf(d){
-  const p=d[W].pos, m=(d.mom?d.mom.d20:0)||0, z=d.zone, rk=d.rank, gs=d.g_size;
-  if(p<40 && m>0){
-    if(z==='底部反转') return '近5年低位且刚转强（底部反转），组内第'+rk+'，值得重点跟踪，等回踩确认';
-    return '低位且已转强（'+z+'），纳入观察，等放量确认';
-  }
-  if(p<40 && m<=0) return '位置不高但仍在下移（'+z+'），下降趋势，不宜机械抄底，等企稳';
-  if(p>=60) return '位置已偏高（'+z+'），注意回调风险，不追高';
-  return '位置中性（'+z+'），方向不明显，观望';
+  const p=d[W].pos, m=(d.mom?d.mom.d20:0)||0, z=d.zone, rk=d.rank;
+  if(z==='低位·转强') return '近5年低位且刚转强，组内第'+rk+'，值得重点跟踪，等回踩确认';
+  if(z==='低位·弱势') return '位置不高但仍在下移，下降趋势，不宜机械抄底，等企稳信号';
+  if(z==='高位·强势') return '位置已偏高且仍强势，注意回调风险，不追高';
+  if(z==='高位·走弱') return '位置偏高且已转弱（跑输基准），警惕回落，回避';
+  return '位置中性，方向不明显，观望为主';
 }
 
 function drawOpportunity(){
@@ -732,8 +739,10 @@ function render(){
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+VIEW));
   document.getElementById('ycg').style.display=VIEW==='mx'?'':'none';
   const a=rowsFor();
-  document.getElementById('nbar').textContent='当前显示 '+a.length+' 个标的'
-    +(ZONE?'（状态：'+ZONE+'）':'')+' · 基准沪深300 位置 '+BENCH[W].pos+'%';
+  let label='当前显示 '+a.length+' 个标的'+(KEY?'（搜索：'+KEY+'）':'');
+  if(ZONE) label+='（状态：'+ZONE+'）';
+  label+=' · 基准沪深300 位置 '+BENCH[W].pos+'%';
+  document.getElementById('nbar').textContent=label;
   drawLegend();
   if(VIEW==='tp') drawTiles();
   if(VIEW==='op') setTimeout(()=>drawOpportunity(),20);
@@ -755,6 +764,8 @@ document.querySelectorAll('.tab[data-p]').forEach(t=>t.onclick=()=>{
 document.querySelectorAll('.tab[data-y]').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab[data-y]').forEach(z=>z.classList.remove('on'));
   t.classList.add('on'); YAX=t.dataset.y; render();});
+function onSearch(v){KEY=v.trim().toLowerCase();render();}
+document.getElementById('q').value='';
 document.querySelectorAll('.chip[data-z]').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.chip[data-z]').forEach(z=>z.classList.remove('on'));
   t.classList.add('on'); ZONE=t.dataset.z; render();});
