@@ -142,17 +142,19 @@ def dchip(cur, prev, label, color, hint):
 def headline_html():
     """今日看头条：先回答「今天变了吗」"""
     if not PREV:
-        return ('<div class="hd"><div class="hdt">今日看点</div>'
+        return ('<div class="hd"><div class="hdt">今日定调</div>'
                 '<div class="hdg">'
                 + dchip(SUM_NOW["cold"], None, "冰点区", "#1E88C9", "5年位置 <20%")
                 + dchip(SUM_NOW["hot"], None, "偏高 + 高位", "#FF5B5B", "5年位置 ≥60%")
                 + dchip(SUM_NOW["turn"], None, "低位转强", "#1EC98B", "位置<40% 且 20日上行")
                 + '</div><div class="hdr"><span class="hdl">基准已建立</span>'
                 '<span class="dim">首次运行，已写入快照。明天起这里会显示相对上一交易日的变化。</span>'
-                '</div></div>')
+                '</div>'
+                + '<div class="hdr"><span class="hdl">策略</span><span class="strat">'+STRATEGY+'</span></div>'
+                + '</div>')
 
     ps = PREV.get("sum") or {}
-    h = '<div class="hd"><div class="hdt">今日看点<span class="hdd">对比上一交易日 ' + PREV_KEY + '</span></div>'
+    h = '<div class="hd"><div class="hdt">今日定调<span class="hdd">对比上一交易日 ' + PREV_KEY + '</span></div>'
     h += ('<div class="hdg">'
           + dchip(SUM_NOW["cold"], ps.get("cold"), "冰点区", "#1E88C9", "5年位置 <20%")
           + dchip(SUM_NOW["hot"], ps.get("hot"), "偏高 + 高位", "#FF5B5B", "5年位置 ≥60%")
@@ -178,8 +180,32 @@ def headline_html():
         h += f'<div class="hdr"><span class="hdl">状态跨档</span>{s}</div>'
     else:
         h += '<div class="hdr"><span class="hdl">状态跨档</span><span class="dim">今日无标的切换状态</span></div>'
-    return h + '</div>'
+    return h + '<div class="hdr"><span class="hdl">策略</span><span class="strat">'+STRATEGY+'</span></div>' + '</div>'
 
+
+def strategy_text():
+    """一句话策略：基于低位转强数量 + 多数标的的5年位置方向"""
+    turn = SUM_NOW["turn"]
+    if PREV:
+        up = sum(1 for _, _, d in MOVES if d > 0)
+        dn = sum(1 for _, _, d in MOVES if d < 0)
+        total = len(MOVES)
+    else:
+        up = dn = total = None
+    if turn == 0:
+        s = "当前无低位转强标的，市场偏弱 —— 宜观望，不急于抄底"
+    elif turn <= 3:
+        s = f"低位转强仅 {turn} 个，机会零星 —— 等更明确的板块级信号"
+    else:
+        s = f"低位转强 {turn} 个 —— 可重点跟踪这些低位标的的回踩确认，不追高"
+    if total:
+        if dn > up:
+            s += "；且多数标的 5 年位置在下行（降多升少），整体处于退潮"
+        elif up > dn:
+            s += "；且多数标的 5 年位置在爬升（升多降少），整体回暖"
+    return s
+
+STRATEGY = strategy_text()
 
 HEADLINE = headline_html()
 
@@ -377,6 +403,34 @@ tr:hover td{background:#14304d}
 .opScore{display:flex;align-items:center;gap:7px}
 .opScore i{height:6px;border-radius:3px;display:block;min-width:3px;background:#6f8bab}
 .opScore b{font-variant-numeric:tabular-nums;color:#e6f0fa;min-width:22px;text-align:right}
+.opCard{display:flex;gap:10px;background:#0c2238;border:1px solid #1c3a5e;border-radius:8px;padding:10px 12px;cursor:pointer;align-items:stretch}
+.opCard:hover{border-color:#2a5a8a;background:#102a43}
+.opCard.on{border-color:#1EC98B}
+.opBar{width:5px;border-radius:3px;flex-shrink:0;align-self:stretch}
+.opMain{flex:1;min-width:0}
+.opTop{display:flex;align-items:center;gap:10px}
+.opNo{color:#5d7a99;font-weight:600;min-width:22px;text-align:center;font-variant-numeric:tabular-nums}
+.opName{font-weight:500;color:#e6f0fa;font-size:14px}
+.opGrp{display:block;font-size:10px;color:#5d7a99;font-weight:400;margin-top:1px}
+.opScore{margin-left:auto;display:flex;align-items:center;gap:7px}
+.opScore i{height:6px;border-radius:3px;display:block;min-width:3px;background:#6f8bab}
+.opScore b{font-variant-numeric:tabular-nums;color:#e6f0fa;min-width:22px;text-align:right}
+.opSub{font-size:11px;color:#9ab3cc;margin-top:5px;font-variant-numeric:tabular-nums}
+.opVerdict{font-size:12px;color:#cfe0f2;margin-top:5px;line-height:1.5}
+.relBox{margin-top:14px;border:1px solid #1c3a5e;border-radius:10px;padding:12px 14px;background:#0d2237}
+.relHint{color:#5d7a99;font-size:12px;text-align:center;padding:14px 0}
+.relTitle{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.relTitle b{font-size:13px;color:#cfe0f2;font-weight:600}
+.relTitle .x{margin-left:auto;font-size:18px;color:#8fa8c4;cursor:pointer;background:none;border:none;line-height:1}
+.relTiles{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+.relTile{width:96px;border:1px solid;border-radius:8px;padding:7px 9px;cursor:pointer}
+.relTile:hover{outline:1px solid #ffd54f;outline-offset:1px}
+.rtn{font-size:11px;color:#cfe0f2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rtp{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25}
+.rtz{font-size:11px;font-variant-numeric:tabular-nums;font-weight:600}
+.relConcl{font-size:12.5px;color:#cfe0f2;line-height:1.6;background:#0c2238;border:1px solid #1c3a5e;border-radius:8px;padding:9px 11px}
+.relConcl b{color:#1EC98B}
+.strat{color:#ffd54f;font-size:12px;line-height:1.5}
 </style></head><body>
 <div class="wrap">
 <h1>A股板块位置温度计</h1>
@@ -387,8 +441,8 @@ __HEADLINE__
 <div class="card">
 <div class="ctl">
   <div class="cg"><span class="clab">视图</span>
-    <span class="tab on" data-v="tp">瓦片</span>
-    <span class="tab" data-v="op">机会</span>
+    <span class="tab" data-v="tp">瓦片</span>
+    <span class="tab on" data-v="op">机会</span>
     <span class="tab" data-v="mx">矩阵</span>
     <span class="tab" data-v="rk">排行</span>
     <span class="tab" data-v="tb">表格</span>
@@ -409,14 +463,15 @@ __HEADLINE__
 <div class="legend" id="lg"></div>
 <div id="nbar" class="sub" style="margin-bottom:8px"></div>
 
-<div class="view on" id="v-tp">
+<div class="view" id="v-tp">
   <div id="tileBox"></div>
   <div class="sub" style="margin-top:10px">每个方块是一个标的，数字 = 位置百分位（0 = 窗口最低，100 = 窗口最高），底色按冷热分档。点击方块查看详情。</div>
 </div>
 
-<div class="view" id="v-op">
+<div class="view on" id="v-op">
   <div id="opBox"></div>
-  <div class="sub" style="margin-top:10px">信号分 = 位置低 55% + 轮动转强 20% + 组内靠前 15% + 状态质量 10%，窗口切换时实时重算。分数仅作筛选排序参考，仍需结合详情三重确认再动手。</div>
+  <div id="relBox" class="relBox"><div class="relHint">点击上方任一卡片，查看其所属板块的「相关行情」——同组标的联动高亮 + 片区结论</div></div>
+  <div class="sub" style="margin-top:10px">信号分 = 位置低 55% + 轮动转强 20% + 组内靠前 15% + 状态质量 10%，窗口切换时实时重算。点击任意卡片展开其所属板块的「相关行情」（同组联动 + 片区结论）；点瓦片 / 迷你瓦片看详情。分数仅作参考，需结合详情三重确认。</div>
 </div>
 
 <div class="view" id="v-mx">
@@ -459,7 +514,7 @@ __HEADLINE__
 const DATA=__DATAJS__;
 const BENCH=__BENCHJS__;
 const GROUPS=__GROUPSJS__;
-let W='w5', POOL='all', VIEW='tp', ZONE='', YAX='ex', CH=null, MX=null;
+let W='w5', POOL='all', VIEW='op', ZONE='', YAX='ex', CH=null, MX=null;
 const YDEF={ex:{k:'excess1y',t:'近1年超额',u:'%',q:['底部反转','高位强势','阴跌寻底','高位走弱']},
             m60:{k:'d60',t:'轮动60日',u:'',q:['低位爬升','高位加速','低位下坠','高位回落']},
             m20:{k:'d20',t:'轮动20日',u:'',q:['低位反弹','高位冲高','低位探底','高位跳水']}};
@@ -599,6 +654,17 @@ function drawTiles(){
   document.getElementById('tileBox').innerHTML=h||'<div class="empty">当前筛选无数据</div>';
 }
 
+function verdictOf(d){
+  const p=d[W].pos, m=(d.mom?d.mom.d20:0)||0, z=d.zone, rk=d.rank, gs=d.g_size;
+  if(p<40 && m>0){
+    if(z==='底部反转') return '近5年低位且刚转强（底部反转），组内第'+rk+'，值得重点跟踪，等回踩确认';
+    return '低位且已转强（'+z+'），纳入观察，等放量确认';
+  }
+  if(p<40 && m<=0) return '位置不高但仍在下移（'+z+'），下降趋势，不宜机械抄底，等企稳';
+  if(p>=60) return '位置已偏高（'+z+'），注意回调风险，不追高';
+  return '位置中性（'+z+'），方向不明显，观望';
+}
+
 function drawOpportunity(){
   const arr=rowsFor().map(d=>({d,s:signalOf(d)})).sort((x,y)=>y.s-x.s);
   // 强信号 = 分够高 且 20日真在转强（仍在下移的便宜标的只列为候选，不进强信号区）
@@ -608,20 +674,58 @@ function drawOpportunity(){
   h+='<div class="opList">';
   arr.forEach((x,i)=>{
     const d=x.d, sc=x.s, p=d[W].pos, m=(d.mom?d.mom.d20:0)||0, up=m>=0;
-    const mtxt=(up?'↑ ':'↓ ')+(m>0?'+':'')+m.toFixed(1);
     const sc2=sc>=60?'#1EC98B':sc>=45?'#5DCAA5':'#6f8bab';
-    h+=`<div class="opRow" onclick="showDetail('${d.code}')">`
-      +`<span class="opNo">${i+1}</span>`
-      +`<div class="opName">${d.name}<span class="opGrp">${d.group}</span></div>`
-      +`<div class="opPos"><i style="width:${p}%;background:${cp(p)}"></i><b>${p.toFixed(0)}%</b></div>`
-      +`<div class="opMom ${up?'up':'dn'}">${mtxt}</div>`
-      +`<div class="opRank">组 ${d.rank}/${d.g_size}</div>`
-      +`<div class="opZone" style="color:${zc(d.zone)}">${d.zone}</div>`
-      +`<div class="opScore"><i style="width:${sc}%;background:${sc2}"></i><b>${sc}</b></div>`
-      +`</div>`;
+    const mtxt=(up?'↑ ':'↓ ')+(m>0?'+':'')+m.toFixed(1);
+    h+=`<div class="opCard" data-code="${d.code}" onclick="showRelated('${d.code}')">`
+      +`<span class="opBar" style="background:${sc2}"></span>`
+      +`<div class="opMain">`
+      +`<div class="opTop"><span class="opNo">${i+1}</span>`
+      +`<span class="opName">${d.name}<span class="opGrp">${d.group}</span></span>`
+      +`<span class="opScore"><i style="width:${sc}%;background:${sc2}"></i><b>${sc}</b></span></div>`
+      +`<div class="opSub">位 ${p.toFixed(0)}%　${mtxt}　组 ${d.rank}/${d.g_size}　状态 ${d.zone}</div>`
+      +`<div class="opVerdict">≈ ${verdictOf(d)}</div>`
+      +`</div></div>`;
   });
   h+='</div>';
   document.getElementById('opBox').innerHTML=h||'<div class="empty">当前筛选无数据</div>';
+}
+
+// C 相关行情联动：点机会卡 → 同组标的高亮 + 片区结论（同状态且同方向者加深）
+function showRelated(code){
+  const d=DATA[code]; if(!d) return;
+  const grp=d.group;
+  const same=Object.values(DATA).filter(x=>x.group===grp).sort((a,b)=>a[W].pos-b[W].pos);
+  const n=same.length;
+  const lowUp=same.filter(x=>x[W].pos<40 && ((x.mom?x.mom.d20:0)||0)>0).length;
+  const lowDn=same.filter(x=>x[W].pos<40 && ((x.mom?x.mom.d20:0)||0)<=0).length;
+  const hi=same.filter(x=>x[W].pos>=60).length;
+  let concl;
+  if(lowUp>=Math.ceil(n/2)) concl=`${grp} 板块 <b>${lowUp}/${n}</b> 处于低位且转强，是今日最集中的机会片区；建议优先看是否集体放量确认板块级启动`;
+  else if(lowDn>=Math.ceil(n/2)) concl=`${grp} 板块 <b>${lowDn}/${n}</b> 整体低位但仍在下移，宜等企稳信号再动手`;
+  else if(hi>=Math.ceil(n/2)) concl=`${grp} 板块 <b>${hi}/${n}</b> 已处高位，注意回调风险，不追高`;
+  else concl=`${grp} 板块 <b>${n}</b> 个标的信号分散（转强 ${lowUp} · 下行 ${lowDn} · 高位 ${hi}），暂无明显方向，观望`;
+  const baseM=((d.mom?d.mom.d20:0)||0)>0;
+  let th='<div class="relTiles">';
+  same.forEach(x=>{
+    const p=x[W].pos, m=((x.mom?x.mom.d20:0)||0), xm=m>0;
+    const strong=(x.zone===d.zone)&&(xm===baseM);
+    const bg=strong?'#0f3a2e':'#0c2238', bd=strong?'#1EC98B':'#1c3a5e';
+    th+=`<div class="relTile" style="background:${bg};border-color:${bd}" onclick="showDetail('${x.code}')">`
+      +`<div class="rtn">${x.name}</div>`
+      +`<div class="rtp" style="color:${cp(p)}">${p.toFixed(0)}</div>`
+      +`<div class="rtz" style="color:${m>0?'#FF5B5B':'#1EC98B'}">${m>0?'↑ +':'↓ '}${m.toFixed(1)}</div></div>`;
+  });
+  th+='</div>';
+  document.getElementById('relBox').innerHTML=
+    '<div class="relTitle"><b>相关行情 · '+d.name+' 所属「'+grp+'」板块（'+n+' 个标的）</b><button class="x" onclick="closeRel()">×</button></div>'
+    +th
+    +'<div class="relConcl">'+concl+'</div>';
+  document.querySelectorAll('.opCard').forEach(c=>c.classList.toggle('on',c.dataset.code===code));
+  document.getElementById('relBox').scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+function closeRel(){
+  document.getElementById('relBox').innerHTML='<div class="relHint">点击上方任一卡片，查看其所属板块的「相关行情」——同组标的联动高亮 + 片区结论</div>';
+  document.querySelectorAll('.opCard').forEach(c=>c.classList.remove('on'));
 }
 
 function render(){
@@ -644,7 +748,7 @@ document.querySelectorAll('.tab[data-v]').forEach(t=>t.onclick=()=>{
   t.classList.add('on'); VIEW=t.dataset.v; render();});
 document.querySelectorAll('.tab[data-w]').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab[data-w]').forEach(z=>z.classList.remove('on'));
-  t.classList.add('on'); W=t.dataset.w; render();});
+  t.classList.add('on'); W=t.dataset.w; closeRel(); render();});
 document.querySelectorAll('.tab[data-p]').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab[data-p]').forEach(z=>z.classList.remove('on'));
   t.classList.add('on'); POOL=t.dataset.p; render();});
