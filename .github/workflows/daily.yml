@@ -77,6 +77,19 @@ jobs:
           print('校验通过：%d 个标的，%d 字节' % (n, len(s)))
           PY
 
+      # 内联 JS 语法破损是沉默失败：HTML 结构、占位符、标的数全都正常，
+      # 只有打开页面才发现整个交互全废。这里用 node 只解析不执行来拦住它。
+      - name: Check inline JS syntax
+        run: |
+          node <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const s=fs.readFileSync('index.html','utf8');
+          const m=s.match(/<script>\nconst DATA=[\s\S]*?<\/script>/);
+          if(!m){ console.error('未找到内联脚本'); process.exit(1); }
+          new vm.Script(m[0].replace(/^<script>/,'').replace(/<\/script>$/,''));
+          console.log('内联 JS 语法通过');
+          NODE
+
       - name: Commit & push updated report
         run: |
           git config user.name "github-actions[bot]"
