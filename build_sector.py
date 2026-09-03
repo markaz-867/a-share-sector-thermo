@@ -4,12 +4,14 @@
 三视图：矩阵（找机会）/ 排行（排序比较）/ 表格（全字段）
 新增维度：轮动速度（20/60 日位置变化）、组内排名、月度走势曲线
 """
-import json, datetime
+import json, datetime, os
 
 D = json.load(open("sector_data.json", encoding="utf-8"))
 META, ITEMS = D["meta"], D["items"]
 BENCH = META["bench"]
 NOW = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+END_DATE = ITEMS[0]["last_date"] if ITEMS else "—"
+HIST_FILE = "history.json"
 
 ORDER = ["中证一级行业", "细分行业指数", "AI·半导体·算力", "新能源", "医药",
          "消费", "金融地产", "资源周期", "军工·宽基"]
@@ -73,6 +75,113 @@ for it in ITEMS:
 # 筛选器顺序：按「冷 → 热」排列，未出现的状态不显示
 ZONE_ORDER = ["阴跌寻底", "低位磨底", "低位企稳", "底部反转", "回暖中",
               "偏低", "中性", "偏高", "高位走弱", "高位强势", "高位"]
+
+
+# ---------------- 历史快照与今日变化 ----------------
+def load_hist():
+    if os.path.exists(HIST_FILE):
+        try:
+            return json.load(open(HIST_FILE, encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_hist(h):
+    """只保留最近 40 个交易日，防止文件无限膨胀"""
+    for k in sorted(h.keys())[:-40]:
+        h.pop(k, None)
+    json.dump(h, open(HIST_FILE, "w", encoding="utf-8"),
+              ensure_ascii=False, separators=(",", ":"))
+
+
+def summary_of(items):
+    return {
+        "cold": sum(1 for i in items if i["w5"]["pos"] < 20),
+        "hot": sum(1 for i in items if i["w5"]["pos"] >= 60),
+        "turn": sum(1 for i in items
+                    if i["w5"]["pos"] < 40 and ((i.get("mom") or {}).get("d20") or 0) > 0),
+    }
+
+
+HIST = load_hist()
+PREV_KEY = max([k for k in HIST if k < END_DATE], default=None)
+PREV = HIST.get(PREV_KEY) if PREV_KEY else None
+SUM_NOW = summary_of(ITEMS)
+
+# 逐标的对比：位置变化 + 状态跨档
+MOVES, CROSSES = [], []
+if PREV:
+    for i in ITEMS:
+        pv = (PREV.get("items") or {}).get(i["code"])
+        if not pv:
+            continue
+        MOVES.append((i["name"], i["code"], round(i["w5"]["pos"] - pv["p5"], 2)))
+        if pv.get("z") and pv["z"] != i["zone"]:
+            CROSSES.append((i["name"], i["code"], pv["z"], i["zone"]))
+    MOVES.sort(key=lambda x: -x[2])
+    CROSSES.sort(key=lambda x: x[2])
+
+
+def dchip(cur, prev, label, color, hint):
+    """数字卡 + 环比"""
+    if prev is None:
+        d = ""
+    else:
+        delta = cur - prev
+        if delta == 0:
+            d = '<i style="color:#6f8bab">持平</i>'
+        else:
+            c = "#FF5B5B" if delta > 0 else "#1EC98B"
+            d = f'<i style="color:{c}">{delta:+d}</i>'
+    return (f'<div class="hdc"><span>{label}</span>'
+            f'<b style="color:{color}">{cur}</b>{d}'
+            f'<em>{hint}</em></div>')
+
+
+def headline_html():
+    """今日看头条：先回答「今天变了吗」"""
+    if not PREV:
+        return ('<div class="hd"><div class="hdt">今日看点</div>'
+                '<div class="hdg">'
+                + dchip(SUM_NOW["cold"], None, "冰点区", "#1E88C9", "5年位置 <20%")
+                + dchip(SUM_NOW["hot"], None, "偏高 + 高位", "#FF5B5B", "5年位置 ≥60%")
+                + dchip(SUM_NOW["turn"], None, "低位转强", "#1EC98B", "位置<40% 且 20日上行")
+                + '</div><div class="hdr"><span class="hdl">基准已建立</span>'
+                '<span class="dim">首次运行，已写入快照。明天起这里会显示相对上一交易日的变化。</span>'
+                '</div></div>')
+
+    ps = PREV.get("sum") or {}
+    h = '<div class="hd"><div class="hdt">今日看点<span class="hdd">对比上一交易日 ' + PREV_KEY + '</span></div>'
+    h += ('<div class="hdg">'
+          + dchip(SUM_NOW["cold"], ps.get("cold"), "冰点区", "#1E88C9", "5年位置 <20%")
+          + dchip(SUM_NOW["hot"], ps.get("hot"), "偏高 + 高位", "#FF5B5B", "5年位置 ≥60%")
+          + dchip(SUM_NOW["turn"], ps.get("turn"), "低位转强", "#1EC98B", "位置<40% 且 20日上行")
+          + '</div>')
+
+    def mvrow(title, rows, color, arrow):
+        if not rows:
+            return f'<div class="hdr"><span class="hdl">{title}</span><span class="dim">无</span></div>'
+        s = "".join(
+            f'<span class="mv" style="color:{color}" onclick="showDetail(\'{c}\')">'
+            f'{arrow}{n} <b>{d:+.1f}</b></span>' for n, c, d in rows)
+        return f'<div class="hdr"><span class="hdl">{title}</span>{s}</div>'
+
+    h += mvrow("位置升幅", MOVES[:3], "#FF5B5B", "▲")
+    h += mvrow("位置降幅", MOVES[-3:][::-1], "#1EC98B", "▼")
+
+    if CROSSES:
+        s = "".join(
+            f'<span class="mv" style="color:#ffd54f" onclick="showDetail(\'{c}\')">'
+            f'{n} <b style="color:#9ab3cc">{z0} → {z1}</b></span>'
+            for n, c, z0, z1 in CROSSES[:6])
+        h += f'<div class="hdr"><span class="hdl">状态跨档</span>{s}</div>'
+    else:
+        h += '<div class="hdr"><span class="hdl">状态跨档</span><span class="dim">今日无标的切换状态</span></div>'
+    return h + '</div>'
+
+
+HEADLINE = headline_html()
 
 
 def col_pos(v):
@@ -157,6 +266,7 @@ CHIPS = "".join(
 
 DATA_JS = json.dumps({i["code"]: i for i in ITEMS}, ensure_ascii=False)
 BENCH_JS = json.dumps({k: BENCH.get(k) for k in ("w3", "w5", "ret1y")}, ensure_ascii=False)
+GROUPS_JS = json.dumps(GROUPS, ensure_ascii=False)
 
 HTML = """<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -224,15 +334,42 @@ tr:hover td{background:#14304d}
 .kv b{font-size:15px;color:#e6f0fa}
 .foot{color:#5d7a99;font-size:11px;line-height:1.7;margin-top:22px;border-top:1px solid #1c3a5e;padding-top:12px}
 .empty{color:#6f8bab;font-size:13px;padding:30px 0;text-align:center}
+.hd{background:#0d2237;border:1px solid #2a5a8a;border-radius:10px;padding:13px 15px 14px;margin-bottom:14px}
+.hdt{font-size:13px;color:#cfe0f2;font-weight:600;margin-bottom:10px}
+.hdd{font-size:11px;color:#5d7a99;font-weight:400;margin-left:8px}
+.hdg{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:10px;margin-bottom:11px}
+.hdc{background:#102a43;border:1px solid #1c3a5e;border-radius:8px;padding:9px 12px 10px}
+.hdc span{display:block;font-size:11px;color:#6f8bab}
+.hdc b{font-size:23px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25}
+.hdc i{font-style:normal;font-size:12px;margin-left:7px;font-weight:600}
+.hdc em{display:block;font-style:normal;font-size:10px;color:#4d6b8a;margin-top:1px}
+.hdr{display:flex;gap:9px;flex-wrap:wrap;align-items:center;font-size:12px;margin-top:7px}
+.hdl{color:#5d7a99;font-size:11px;min-width:58px;flex-shrink:0}
+.mv{color:#9ab3cc;background:#0c2238;border:1px solid #1c3a5e;border-radius:16px;padding:3px 10px;cursor:pointer;white-space:nowrap}
+.mv:hover{border-color:#2a5a8a}
+.mv b{font-variant-numeric:tabular-nums}
+.tgrp{margin-bottom:15px}
+.tgh{display:flex;align-items:baseline;gap:9px;margin-bottom:7px}
+.tgh b{font-size:13px;color:#cfe0f2;font-weight:600}
+.tcnt{font-size:11px;color:#6f8bab}
+.tw2{display:flex;gap:7px;flex-wrap:wrap}
+.tile{width:106px;border:1px solid;border-radius:9px;padding:7px 9px 8px;cursor:pointer}
+.tile:hover{outline:1px solid #ffd54f;outline-offset:1px}
+.tn{font-size:11px;color:#cfe0f2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tv{font-size:21px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25}
+.tz{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style></head><body>
 <div class="wrap">
 <h1>A股板块位置温度计</h1>
 <div class="meta">数据截至 <b style="color:#ffd54f">__END__</b> ｜ 页面生成 <b style="color:#ffd54f">__NOW__</b>（北京时间）｜ 数据源：腾讯行情（主）/ 新浪（备）｜ 共 __N__ 个标的，基准 __BENCH__</div>
 
+__HEADLINE__
+
 <div class="card">
 <div class="ctl">
   <div class="cg"><span class="clab">视图</span>
-    <span class="tab on" data-v="mx">矩阵</span>
+    <span class="tab on" data-v="tp">瓦片</span>
+    <span class="tab" data-v="mx">矩阵</span>
     <span class="tab" data-v="rk">排行</span>
     <span class="tab" data-v="tb">表格</span>
   </div>
@@ -252,7 +389,12 @@ tr:hover td{background:#14304d}
 <div class="legend" id="lg"></div>
 <div id="nbar" class="sub" style="margin-bottom:8px"></div>
 
-<div class="view on" id="v-mx">
+<div class="view on" id="v-tp">
+  <div id="tileBox"></div>
+  <div class="sub" style="margin-top:10px">每个方块是一个标的，数字 = 位置百分位（0 = 窗口最低，100 = 窗口最高），底色按冷热分档。点击方块查看详情。</div>
+</div>
+
+<div class="view" id="v-mx">
   <div id="mxBox"><canvas id="mx" role="img" aria-label="板块位置与超额收益矩阵散点图">板块矩阵图</canvas></div>
   <div class="sub" style="margin-top:8px">点击任意圆点查看该板块的走势曲线、轮动速度与逐年低高点明细</div>
 </div>
@@ -291,7 +433,8 @@ tr:hover td{background:#14304d}
 <script>
 const DATA=__DATAJS__;
 const BENCH=__BENCHJS__;
-let W='w5', POOL='all', VIEW='mx', ZONE='', YAX='ex', CH=null, MX=null;
+const GROUPS=__GROUPSJS__;
+let W='w5', POOL='all', VIEW='tp', ZONE='', YAX='ex', CH=null, MX=null;
 const YDEF={ex:{k:'excess1y',t:'近1年超额',u:'%',q:['底部反转','高位强势','阴跌寻底','高位走弱']},
             m60:{k:'d60',t:'轮动60日',u:'',q:['低位爬升','高位加速','低位下坠','高位回落']},
             m20:{k:'d20',t:'轮动20日',u:'',q:['低位反弹','高位冲高','低位探底','高位跳水']}};
@@ -390,6 +533,31 @@ function drawRank(){
   });
 }
 
+const tb=p=>p<=20?'#10334e':p<=40?'#123049':p<=60?'#17293c':p<=80?'#3a2a11':'#3d1718';
+const tbd=p=>p<=20?'#1E88C9':p<=40?'#4FA3D1':p<=60?'#6f8bab':p<=80?'#FFA726':'#FF5B5B';
+
+function drawTiles(){
+  const a=rowsFor(), gs={};
+  a.forEach(d=>{(gs[d.group]=gs[d.group]||[]).push(d);});
+  let h='';
+  GROUPS.forEach(g=>{
+    const lst=(gs[g]||[]).slice().sort((x,y)=>x[W].pos-y[W].pos);
+    if(!lst.length) return;
+    const avg=lst.reduce((s,x)=>s+x[W].pos,0)/lst.length;
+    h+='<div class="tgrp"><div class="tgh"><b>'+g+'</b><span class="tcnt">'
+      + lst.length+' 个 · 均 '+avg.toFixed(0)+'%</span></div><div class="tw2">';
+    lst.forEach(d=>{
+      const p=d[W].pos;
+      h+=`<div class="tile" style="background:${tb(p)};border-color:${tbd(p)}" onclick="showDetail('${d.code}')">`
+        +`<div class="tn">${d.name}</div>`
+        +`<div class="tv" style="color:${cp(p)}">${p.toFixed(0)}</div>`
+        +`<div class="tz" style="color:${zc(d.zone)}">${d.zone}</div></div>`;
+    });
+    h+='</div></div>';
+  });
+  document.getElementById('tileBox').innerHTML=h||'<div class="empty">当前筛选无数据</div>';
+}
+
 function render(){
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+VIEW));
   document.getElementById('ycg').style.display=VIEW==='mx'?'':'none';
@@ -397,6 +565,7 @@ function render(){
   document.getElementById('nbar').textContent='当前显示 '+a.length+' 个标的'
     +(ZONE?'（状态：'+ZONE+'）':'')+' · 基准沪深300 位置 '+BENCH[W].pos+'%';
   drawLegend();
+  if(VIEW==='tp') drawTiles();
   // 容器刚由 display:none 转为可见时，Chart.js 量得到尺寸却不自动重绘，
   // 故延迟一帧绘制后再显式 resize 一次，否则图上只有坐标轴没有内容
   if(VIEW==='mx') setTimeout(()=>{drawMX(); setTimeout(()=>{if(MX)MX.resize();},120);},40);
@@ -500,15 +669,31 @@ render();
 </script></body></html>"""
 
 HTML = (HTML.replace("__NOW__", NOW)
-            .replace("__END__", ITEMS[0]["last_date"] if ITEMS else "—")
+            .replace("__END__", END_DATE)
             .replace("__N__", str(len(ITEMS)))
             .replace("__BENCH__", BENCH["name"])
             .replace("__CHIPS__", CHIPS)
             .replace("__TABLES__", tables)
             .replace("__DATAJS__", DATA_JS)
-            .replace("__BENCHJS__", BENCH_JS))
+            .replace("__BENCHJS__", BENCH_JS)
+            .replace("__GROUPSJS__", GROUPS_JS)
+            .replace("__HEADLINE__", HEADLINE))
 
 open("sector_report.html", "w", encoding="utf-8").write(HTML)
 open("index.html", "w", encoding="utf-8").write(HTML)
 print(f"生成完成：{len(ITEMS)} 个标的，{len(GROUPS)} 个分组，{len(HTML):,} 字节")
 print("状态分布:", dict(sorted(ZONE_CNT.items(), key=lambda x: -x[1])))
+
+# 写入当日快照，供下一个交易日对比；数据不全时跳过，避免污染历史
+if len(ITEMS) >= 40:
+    HIST[END_DATE] = {
+        "items": {i["code"]: {"p5": round(i["w5"]["pos"], 2),
+                              "p3": round(i["w3"]["pos"], 2),
+                              "z": i["zone"],
+                              "c": i["last_close"]} for i in ITEMS},
+        "sum": SUM_NOW,
+    }
+    save_hist(HIST)
+    print(f"快照已写入 {HIST_FILE}：{END_DATE}（累计 {len(HIST)} 个交易日）")
+else:
+    print(f"标的数 {len(ITEMS)} < 40，跳过快照写入")
