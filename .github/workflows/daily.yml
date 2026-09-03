@@ -23,6 +23,13 @@ on:
 permissions:
   contents: write
 
+# 一次推送多个文件会产生多个 commit，进而触发多次运行；
+# 并发跑到最后的 git push 会互相撞车。这里让同组任务只保留最新一次，
+# 取消排队中的旧任务（被取消的不会提交，不会污染仓库）。
+concurrency:
+  group: sector-daily
+  cancel-in-progress: true
+
 env:
   TZ: Asia/Shanghai
 
